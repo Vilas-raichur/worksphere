@@ -1,5 +1,5 @@
-from django.conf import settings
 from django.db import models
+from django.conf import settings
 
 
 class Department(models.Model):
@@ -56,6 +56,40 @@ class Designation(models.Model):
         return self.name
 
 
+class Branch(models.Model):
+    name = models.CharField(
+        max_length=100,
+        unique=True
+    )
+
+    code = models.CharField(
+        max_length=20,
+        unique=True
+    )
+
+    state = models.CharField(
+        max_length=100
+    )
+
+    city = models.CharField(
+        max_length=100
+    )
+
+    is_active = models.BooleanField(
+        default=True
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True
+    )
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
 class Employee(models.Model):
 
     class Status(models.TextChoices):
@@ -69,7 +103,9 @@ class Employee(models.Model):
 
     employee_id = models.CharField(
         max_length=50,
-        unique=True
+        unique=True,
+        null=True,
+        blank=True
     )
 
     first_name = models.CharField(
@@ -108,6 +144,20 @@ class Employee(models.Model):
     designation = models.ForeignKey(
         Designation,
         on_delete=models.PROTECT,
+        related_name="employees"
+    )
+
+    branch = models.ForeignKey(
+        Branch,
+        on_delete=models.PROTECT,
+        related_name="employees"
+    )
+
+    employee_id_configuration = models.ForeignKey(
+        "EmployeeIDConfiguration",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="employees"
     )
 
@@ -151,3 +201,51 @@ class Employee(models.Model):
 
     def __str__(self):
         return f"{self.employee_id} - {self.first_name} {self.last_name}"
+
+
+
+class EmployeeIDConfiguration(models.Model):
+    pattern = models.CharField(
+        max_length=200
+    )
+
+    is_active = models.BooleanField(
+        default=True
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="created_employee_id_configurations"
+    )
+
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="updated_employee_id_configurations"
+    )
+
+    def __str__(self):
+        return self.pattern
+
+
+
+class EmployeeIDSequence(models.Model):
+    last_number = models.PositiveIntegerField(
+        default=0
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True
+    )
+
+    def __str__(self):
+        return f"Last Employee ID Sequence: {self.last_number}"
