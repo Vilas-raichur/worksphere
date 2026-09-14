@@ -98,11 +98,19 @@ class Employee(models.Model):
         ONBOARDING_SUBMITTED = "ONBOARDING_SUBMITTED", "Onboarding Submitted"
         CHANGES_REQUIRED = "CHANGES_REQUIRED", "Changes Required"
         PENDING_APPROVAL = "PENDING_APPROVAL", "Pending Approval"
+        REJECTED = "REJECTED", "Rejected"
         ACTIVE = "ACTIVE", "Active"
         DEACTIVATED = "DEACTIVATED", "Deactivated"
 
     employee_id = models.CharField(
         max_length=50,
+        unique=True,
+        null=True,
+        blank=True
+    )
+
+    onboarding_reference = models.CharField(
+        max_length=20,
         unique=True,
         null=True,
         blank=True
@@ -204,6 +212,88 @@ class Employee(models.Model):
 
 
 
+class OnboardingCorrectionRequest(models.Model):
+    class Status(models.TextChoices):
+        OPEN = "OPEN", "Open"
+        PENDING_VERIFICATION = "PENDING_VERIFICATION", "Pending Verification"
+        RESOLVED = "RESOLVED", "Resolved"
+
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.PROTECT,
+        related_name="onboarding_correction_requests"
+    )
+
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="onboarding_correction_requests_created"
+    )
+
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.OPEN
+    )
+
+    requested_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="onboarding_correction_requests_resolved"
+    )
+
+    def __str__(self):
+        return f"Correction Request - {self.employee}"
+
+
+class OnboardingCorrectionItem(models.Model):
+    class ItemType(models.TextChoices):
+        INFORMATION = "INFORMATION", "Information"
+        DOCUMENT = "DOCUMENT", "Document"
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "Pending"
+        RESOLVED = "RESOLVED", "Resolved"
+
+    correction_request = models.ForeignKey(
+        OnboardingCorrectionRequest,
+        on_delete=models.CASCADE,
+        related_name="items"
+    )
+
+    item_type = models.CharField(
+        max_length=20,
+        choices=ItemType.choices
+    )
+
+    field_name = models.CharField(
+        max_length=100
+    )
+
+    instruction = models.TextField()
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING
+    )
+
+    def __str__(self):
+        return f"{self.field_name} - {self.status}"
+
+        
+
 class EmployeeIDConfiguration(models.Model):
     pattern = models.CharField(
         max_length=200
@@ -233,6 +323,11 @@ class EmployeeIDConfiguration(models.Model):
         related_name="updated_employee_id_configurations"
     )
 
+    def clean(self):
+        from .services import validate_employee_id_pattern
+
+        validate_employee_id_pattern(self.pattern)
+
     def __str__(self):
         return self.pattern
 
@@ -249,3 +344,12 @@ class EmployeeIDSequence(models.Model):
 
     def __str__(self):
         return f"Last Employee ID Sequence: {self.last_number}"
+
+
+
+class OnboardingReferenceSequence(models.Model):
+    last_number = models.PositiveIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Last Onboarding Reference Sequence: {self.last_number}"
