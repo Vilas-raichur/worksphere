@@ -1,6 +1,7 @@
 import re
 
 from django.db import transaction
+from django.utils import timezone
 
 from .models import (
     EmployeeIDSequence,
@@ -306,3 +307,57 @@ def resubmit_onboarding_after_corrections(employee):
     )
 
     return correction_request
+
+
+@transaction.atomic
+def verify_onboarding_correction_request(
+    correction_request,
+    verified_by,
+):
+    if correction_request.status != (
+        OnboardingCorrectionRequest.Status.PENDING_VERIFICATION
+    ):
+        raise ValueError(
+            "Correction request is not pending verification."
+        )
+
+    pending_items = correction_request.items.filter(
+        status=OnboardingCorrectionItem.Status.PENDING
+    )
+
+    if pending_items.exists():
+        raise ValueError(
+            "All correction items must be resolved before onboarding can be approved."
+        )
+
+    employee = correction_request.employee
+
+    if employee.status != Employee.Status.ONBOARDING_SUBMITTED:
+        raise ValueError(
+            "Employee onboarding is not submitted for verification."
+        )
+
+    correction_request.status = (
+        OnboardingCorrectionRequest.Status.RESOLVED
+    )
+    correction_request.resolved_by = verified_by
+    correction_request.resolved_at = timezone.now()
+    correction_request.save(
+        update_fields=[
+            "status",
+            "resolved_by",
+            "resolved_at",
+        ]
+    )
+
+    employee.status = Employee.Status.PENDING_APPROVAL
+    employee.updated_by = verified_by
+    employee.save(
+        update_fields=[
+            "status",
+            "updated_by",
+            "updated_at",
+        ]
+    )
+
+    return employee
