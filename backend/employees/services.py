@@ -175,6 +175,44 @@ def create_employee(
 
 
 @transaction.atomic
+def start_employee_onboarding(employee):
+    if employee.status != Employee.Status.PENDING_ONBOARDING:
+        raise ValueError(
+            "Employee onboarding cannot be started from the current status."
+        )
+
+    employee.status = Employee.Status.ONBOARDING_IN_PROGRESS
+    employee.save(
+        update_fields=[
+            "status",
+            "updated_at",
+        ]
+    )
+
+    return employee
+
+
+
+@transaction.atomic
+def submit_employee_onboarding(employee):
+    if employee.status != Employee.Status.ONBOARDING_IN_PROGRESS:
+        raise ValueError(
+            "Employee onboarding must be in progress before submission."
+        )
+
+    employee.status = Employee.Status.ONBOARDING_SUBMITTED
+    employee.save(
+        update_fields=[
+            "status",
+            "updated_at",
+        ]
+    )
+
+    return employee
+
+
+
+@transaction.atomic
 def approve_employee_onboarding(employee, approved_by=None):
     if employee.status != Employee.Status.PENDING_APPROVAL:
         raise ValueError(
@@ -307,6 +345,31 @@ def resubmit_onboarding_after_corrections(employee):
     )
 
     return correction_request
+
+
+@transaction.atomic
+def resolve_onboarding_correction_item(correction_item):
+    if correction_item.status != OnboardingCorrectionItem.Status.PENDING:
+        raise ValueError(
+            "Correction item is already resolved."
+        )
+
+    if correction_item.correction_request.status != (
+        OnboardingCorrectionRequest.Status.PENDING_VERIFICATION
+    ):
+        raise ValueError(
+            "Correction item cannot be resolved because the correction request "
+            "is not pending verification."
+        )
+
+    correction_item.status = OnboardingCorrectionItem.Status.RESOLVED
+    correction_item.save(
+        update_fields=[
+            "status",
+        ]
+    )
+
+    return correction_item
 
 
 @transaction.atomic
