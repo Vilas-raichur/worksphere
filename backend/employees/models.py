@@ -90,6 +90,54 @@ class Branch(models.Model):
     def __str__(self):
         return f"{self.name} ({self.code})"
 
+class DepartmentApprover(models.Model):
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.PROTECT,
+        related_name="department_approvers"
+    )
+
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.PROTECT,
+        related_name="onboarding_approver_assignments"
+    )
+
+    hr_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="onboarding_department_assignments"
+    )
+
+    is_active = models.BooleanField(
+        default=True
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "department"],
+                name="one_onboarding_approver_per_department"
+            )
+        ]
+
+    def __str__(self):
+        return (
+            f"{self.organization.code} - "
+            f"{self.department.code} - "
+            f"{self.hr_user.username}"
+        )
+
+
+
 class Employee(models.Model):
 
     class Status(models.TextChoices):
@@ -114,6 +162,14 @@ class Employee(models.Model):
         unique=True,
         null=True,
         blank=True
+    )
+
+    organization = models.ForeignKey(
+    "accounts.Organization",
+    on_delete=models.PROTECT,
+    related_name="employees",
+    null=True,
+    blank=True
     )
 
     first_name = models.CharField(

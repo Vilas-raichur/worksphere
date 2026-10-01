@@ -1,4 +1,5 @@
 from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 from .models import Employee,OnboardingCorrectionRequest,OnboardingCorrectionItem
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -25,6 +26,7 @@ from .services import (
 )
 
 class EmployeeCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
     def post(self, request):
         serializer = EmployeeCreateSerializer(
             data=request.data,
@@ -46,6 +48,7 @@ class EmployeeCreateAPIView(APIView):
 
 
 class StartOnboardingAPIView(APIView):
+    permission_classes = [IsAuthenticated]
     def post(self, request):
         serializer = StartOnboardingSerializer(
             data=request.data,
@@ -72,6 +75,7 @@ class StartOnboardingAPIView(APIView):
 
 
 class SubmitOnboardingAPIView(APIView):
+    permission_classes = [IsAuthenticated]
     def post(self, request):
         serializer = SubmitOnboardingSerializer(
             data=request.data,
@@ -98,6 +102,7 @@ class SubmitOnboardingAPIView(APIView):
 
 
 class OnboardingCorrectionRequestCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
     def post(self, request):
         serializer = OnboardingCorrectionRequestCreateSerializer(
             data=request.data,
@@ -120,6 +125,7 @@ class OnboardingCorrectionRequestCreateAPIView(APIView):
 
 
 class StartOnboardingCorrectionsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
     def post(self, request):
         serializer = StartOnboardingCorrectionsSerializer(
             data=request.data,
@@ -146,6 +152,7 @@ class StartOnboardingCorrectionsAPIView(APIView):
 
 
 class ResubmitOnboardingAPIView(APIView):
+    permission_classes = [IsAuthenticated]
     def post(self, request):
         serializer = ResubmitOnboardingSerializer(
             data=request.data,
@@ -175,6 +182,7 @@ class ResubmitOnboardingAPIView(APIView):
 
 
 class ResolveOnboardingCorrectionItemAPIView(APIView):
+    permission_classes = [IsAuthenticated]
     def post(self, request):
         serializer = ResolveOnboardingCorrectionItemSerializer(
             data=request.data,
@@ -208,45 +216,8 @@ class ResolveOnboardingCorrectionItemAPIView(APIView):
         )
 
 
-class ApproveOnboardingAPIView(APIView):
-    def post(self, request):
-        serializer = ApproveOnboardingSerializer(
-            data=request.data,
-            context={"request": request},
-        )
-        serializer.is_valid(raise_exception=True)
-
-        employee = Employee.objects.get(
-            onboarding_reference=serializer.validated_data[
-                "onboarding_reference"
-            ]
-        )
-
-        try:
-            employee = approve_employee_onboarding(
-                employee=employee,
-                approved_by=request.user,
-            )
-        except ValueError as exc:
-            return Response(
-                {
-                    "error": str(exc),
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        return Response(
-            {
-                "message": "Employee onboarding approved successfully.",
-                "onboarding_reference": employee.onboarding_reference,
-                "employee_id": employee.employee_id,
-                "status": employee.status,
-            },
-            status=status.HTTP_200_OK,
-        )
-
-
 class VerifyOnboardingCorrectionAPIView(APIView):
+    permission_classes = [IsAuthenticated]
     def post(self, request):
         serializer = VerifyOnboardingCorrectionSerializer(
             data=request.data,
@@ -280,5 +251,54 @@ class VerifyOnboardingCorrectionAPIView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+
+class ApproveOnboardingAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = ApproveOnboardingSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        employee = Employee.objects.get(
+            onboarding_reference=serializer.validated_data[
+                "onboarding_reference"
+            ]
+        )
+
+        try:
+            employee = approve_employee_onboarding(
+                employee=employee,
+                approved_by=request.user,
+            )
+        except PermissionError as exc:
+            return Response(
+                {
+                    "error": str(exc),
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except ValueError as exc:
+            return Response(
+                {
+                    "error": str(exc),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            {
+                "message": "Employee onboarding approved successfully.",
+                "onboarding_reference": employee.onboarding_reference,
+                "employee_id": employee.employee_id,
+                "status": employee.status,
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 

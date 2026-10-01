@@ -10,8 +10,13 @@ from .models import (
     EmployeeIDConfiguration,
     OnboardingCorrectionRequest,
     OnboardingCorrectionItem,
+    DepartmentApprover,
 )
 
+from accounts.models import (
+    OnboardingApprovalPolicy,
+    UserProfile,
+)
 
 @transaction.atomic
 def get_next_employee_id_sequence():
@@ -133,6 +138,7 @@ def generate_employee_id(employee):
 
 
 @transaction.atomic
+@transaction.atomic
 def create_employee(
     *,
     first_name,
@@ -148,9 +154,27 @@ def create_employee(
     probation_end_date=None,
     created_by=None
 ):
+    if created_by is None:
+        raise ValueError(
+            "A WorkSphere user is required to create an employee."
+        )
+
+    try:
+        user_profile = created_by.worksphere_profile
+    except UserProfile.DoesNotExist:
+        raise ValueError(
+            "The user is not configured as a WorkSphere user."
+        )
+
+    if not user_profile.organization.is_active:
+        raise ValueError(
+            "The user's organization is not active."
+        )
+
     onboarding_reference = get_next_onboarding_reference()
 
     employee = Employee(
+        organization=user_profile.organization,
         first_name=first_name,
         last_name=last_name,
         official_email=official_email,
@@ -211,12 +235,62 @@ def submit_employee_onboarding(employee):
     return employee
 
 
+def can_approve_employee_onboarding(employee, user):
+    if user is None or not user.is_authenticated:
+        return False
+
+    try:
+        user_profile = user.worksphere_profile
+    except UserProfile.DoesNotExist:
+        return False
+
+    if employee.organization_id != user_profile.organization_id:
+        return False
+
+    if user_profile.role == UserProfile.Role.HR:
+        assignment = (
+            DepartmentApprover.objects
+            .filter(
+                organization_id=employee.organization_id,
+                department_id=employee.department_id,
+                hr_user=user,
+                is_active=True,
+            )
+            .first()
+        )
+
+        return assignment is not None
+
+    if user_profile.role == UserProfile.Role.ADMIN:
+        policy = (
+            OnboardingApprovalPolicy.objects
+            .filter(
+                organization_id=employee.organization_id
+            )
+            .first()
+        )
+
+        return (
+            policy is not None
+            and policy.allow_admin_approval
+        )
+
+    return False
+
 
 @transaction.atomic
 def approve_employee_onboarding(employee, approved_by=None):
     if employee.status != Employee.Status.PENDING_APPROVAL:
         raise ValueError(
             "Employee onboarding is not pending approval."
+        )
+
+    if not can_approve_employee_onboarding(
+        employee,
+        approved_by,
+    ):
+        raise PermissionError(
+            "You are not authorized to approve this employee onboarding."
         )
 
     configuration = get_active_employee_id_configuration()
