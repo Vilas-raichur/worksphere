@@ -296,6 +296,7 @@ class ApproveOnboardingAPIView(APIView):
                 "onboarding_reference": employee.onboarding_reference,
                 "employee_id": employee.employee_id,
                 "status": employee.status,
+                "account_status": "PENDING_ACTIVATION",
             },
             status=status.HTTP_200_OK,
         )

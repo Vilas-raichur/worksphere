@@ -1,7 +1,10 @@
 import re
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
+User = get_user_model()
+
 
 from .models import (
     EmployeeIDSequence,
@@ -279,6 +282,57 @@ def can_approve_employee_onboarding(employee, user):
 
 
 @transaction.atomic
+def provision_employee_account(employee):
+    if employee.user_id is not None:
+        return employee.user
+
+    if not employee.employee_id:
+        raise ValueError(
+            "Employee must have a permanent Employee ID "
+            "before an account can be created."
+        )
+
+    if employee.organization_id is None:
+        raise ValueError(
+            "Employee must belong to an organization "
+            "before an account can be created."
+        )
+
+    if User.objects.filter(
+        username=employee.employee_id
+    ).exists():
+        raise ValueError(
+            "A user account with this Employee ID already exists."
+        )
+
+    user = User(
+        username=employee.employee_id,
+        email=employee.official_email,
+        first_name=employee.first_name,
+        last_name=employee.last_name,
+        is_active=False,
+    )
+    user.set_unusable_password()
+    user.save()
+
+    UserProfile.objects.create(
+        user=user,
+        organization=employee.organization,
+        role=UserProfile.Role.EMPLOYEE,
+    )
+
+    employee.user = user
+    employee.save(
+        update_fields=[
+            "user",
+            "updated_at",
+        ]
+    )
+
+    return user
+
+
+@transaction.atomic
 def approve_employee_onboarding(employee, approved_by=None):
     if employee.status != Employee.Status.PENDING_APPROVAL:
         raise ValueError(
@@ -314,6 +368,8 @@ def approve_employee_onboarding(employee, approved_by=None):
             "updated_at",
         ]
     )
+
+    provision_employee_account(employee)
 
     return employee
 

@@ -157,6 +157,14 @@ class Employee(models.Model):
         blank=True
     )
 
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="employee_record"
+    )
+
     onboarding_reference = models.CharField(
         max_length=20,
         unique=True,
