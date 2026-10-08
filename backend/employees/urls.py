@@ -10,6 +10,14 @@ from .views import (
     VerifyOnboardingCorrectionAPIView,
     ResolveOnboardingCorrectionItemAPIView,
     ApproveOnboardingAPIView,
+    VerifyEmployeeActivationTokenAPIView,
+    ResendEmployeeActivationAPIView,
+    RequestEmployeeActivationOTPAPIView,
+    VerifyEmployeeActivationOTPAPIView,
+    SetEmployeeActivationPasswordAPIView,
+    EmployeeOnboardingDetailsAPIView,
+    EmployeeOnboardingDocumentsAPIView,
+    VerifyEmployeeDocumentAPIView,
 )
 
 
@@ -23,6 +31,21 @@ urlpatterns = [
         "corrections/create/",
         OnboardingCorrectionRequestCreateAPIView.as_view(),
         name="onboarding-correction-create",
+    ),
+    path(
+    "onboarding/details/",
+    EmployeeOnboardingDetailsAPIView.as_view(),
+    name="employee-onboarding-details",
+    ),
+    path(
+    "onboarding/documents/",
+    EmployeeOnboardingDocumentsAPIView.as_view(),
+    name="employee-onboarding-documents",
+    ),
+    path(
+    "onboarding/documents/verify/",
+    VerifyEmployeeDocumentAPIView.as_view(),
+    name="employee-onboarding-document-verify",
     ),
     path(
     "onboarding/start/",
@@ -48,6 +71,31 @@ urlpatterns = [
     "corrections/items/resolve/",
     ResolveOnboardingCorrectionItemAPIView.as_view(),
     name="onboarding-correction-item-resolve",
+    ),
+    path(
+    "activation/otp/request/",
+    RequestEmployeeActivationOTPAPIView.as_view(),
+    name="employee-activation-otp-request",
+    ),
+    path(
+    "activation/password/set/",
+    SetEmployeeActivationPasswordAPIView.as_view(),
+    name="employee-activation-password-set",
+    ),
+    path(
+    "activation/otp/verify/",
+    VerifyEmployeeActivationOTPAPIView.as_view(),
+    name="employee-activation-otp-verify",
+    ),
+    path(
+    "activation/resend/",
+    ResendEmployeeActivationAPIView.as_view(),
+    name="employee-activation-resend",
+    ),
+    path(
+    "activation/verify/",
+    VerifyEmployeeActivationTokenAPIView.as_view(),
+    name="employee-activation-verify",
     ),
     path(
     "onboarding/approve/",

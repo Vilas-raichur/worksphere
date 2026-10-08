@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'accounts',
     'employees',
+    'notifications',
 ]
 
 MIDDLEWARE = [
@@ -125,3 +126,22 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend",
+)
+
+DEFAULT_FROM_EMAIL = os.getenv(
+    "DEFAULT_FROM_EMAIL",
+    "notifications@worksphere.local",
+)
+
+WORKSPHERE_ACTIVATION_URL = os.getenv(
+    "WORKSPHERE_ACTIVATION_URL",
+    "http://127.0.0.1:8000/api/employees/activation/verify/",
+)
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"

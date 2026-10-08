@@ -137,6 +137,158 @@ class DepartmentApprover(models.Model):
         )
 
 
+class EmployeeOnboardingDetails(models.Model):
+    employee = models.OneToOneField(
+        "Employee",
+        on_delete=models.CASCADE,
+        related_name="onboarding_details",
+    )
+
+    address_line_1 = models.CharField(
+        max_length=200,
+        blank=True,
+    )
+
+    address_line_2 = models.CharField(
+        max_length=200,
+        blank=True,
+    )
+
+    city = models.CharField(
+        max_length=100,
+        blank=True,
+    )
+
+    state = models.CharField(
+        max_length=100,
+        blank=True,
+    )
+
+    postal_code = models.CharField(
+        max_length=20,
+        blank=True,
+    )
+
+    blood_group = models.CharField(
+        max_length=5,
+        blank=True,
+    )
+
+    emergency_contact_name = models.CharField(
+        max_length=150,
+        blank=True,
+    )
+
+    emergency_contact_mobile = models.CharField(
+        max_length=15,
+        blank=True,
+    )
+
+    emergency_contact_relationship = models.CharField(
+        max_length=50,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    def __str__(self):
+        return (
+            f"Onboarding Details - "
+            f"{self.employee.onboarding_reference}"
+        )
+
+
+class EmployeeDocument(models.Model):
+    class Status(models.TextChoices):
+        PENDING_VERIFICATION = (
+            "PENDING_VERIFICATION",
+            "Pending Verification",
+        )
+        VERIFIED = "VERIFIED", "Verified"
+        CHANGES_REQUIRED = (
+            "CHANGES_REQUIRED",
+            "Changes Required",
+        )
+
+    employee = models.ForeignKey(
+        "Employee",
+        on_delete=models.CASCADE,
+        related_name="documents",
+    )
+
+    document_requirement = models.ForeignKey(
+        "accounts.DocumentRequirement",
+        on_delete=models.PROTECT,
+        related_name="employee_documents",
+    )
+
+    file = models.FileField(
+        upload_to="employee_documents/%Y/%m/",
+    )
+
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.PENDING_VERIFICATION,
+    )
+
+    remarks = models.TextField(
+        blank=True,
+    )
+
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="employee_documents_uploaded",
+    )
+
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="employee_documents_verified",
+    )
+
+    uploaded_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "employee",
+                    "document_requirement",
+                ],
+                name="one_current_document_per_requirement",
+            )
+        ]
+        ordering = ["document_requirement__name"]
+
+    def __str__(self):
+        return (
+            f"{self.employee.onboarding_reference} - "
+            f"{self.document_requirement.code} - "
+            f"{self.status}"
+        )
+
+
 
 class Employee(models.Model):
 
@@ -273,6 +425,89 @@ class Employee(models.Model):
 
     def __str__(self):
         return f"{self.employee_id} - {self.first_name} {self.last_name}"
+
+
+class EmployeeActivationToken(models.Model):
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.CASCADE,
+        related_name="activation_tokens"
+    )
+
+    token_hash = models.CharField(
+        max_length=64,
+        unique=True
+    )
+
+    expires_at = models.DateTimeField()
+
+    used_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    invalidated_at = models.DateTimeField(
+        null=True,
+        blank=True
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    def __str__(self):
+        return (
+            f"Activation Token - "
+            f"{self.employee.onboarding_reference}"
+        )
+
+
+class EmployeeActivationOTP(models.Model):
+    class Channel(models.TextChoices):
+        EMAIL = "EMAIL", "Email"
+        MOBILE = "MOBILE", "Mobile"
+
+    activation_token = models.ForeignKey(
+        EmployeeActivationToken,
+        on_delete=models.CASCADE,
+        related_name="otp_records",
+    )
+
+    channel = models.CharField(
+        max_length=20,
+        choices=Channel.choices,
+        default=Channel.EMAIL,
+    )
+
+    code_hash = models.CharField(
+        max_length=128
+    )
+
+    expires_at = models.DateTimeField()
+
+    attempts = models.PositiveSmallIntegerField(
+        default=0
+    )
+
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    invalidated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    def __str__(self):
+        return (
+            f"Activation OTP - "
+            f"{self.activation_token.employee.onboarding_reference}"
+        )
 
 
 

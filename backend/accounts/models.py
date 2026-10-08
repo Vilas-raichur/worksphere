@@ -14,6 +14,10 @@ class Organization(models.Model):
         unique=True
     )
 
+    activation_link_expiry_hours = models.PositiveIntegerField(
+        default=24
+    )
+
     is_active = models.BooleanField(
         default=True
     )
@@ -98,4 +102,52 @@ class OnboardingApprovalPolicy(models.Model):
         return (
             f"{self.organization.code} - "
             f"Admin Approval: {self.allow_admin_approval}"
+        )
+
+
+class DocumentRequirement(models.Model):
+    organization = models.ForeignKey(
+        Organization,
+        on_delete=models.CASCADE,
+        related_name="document_requirements",
+    )
+
+    code = models.CharField(
+        max_length=50,
+    )
+
+    name = models.CharField(
+        max_length=150,
+    )
+
+    is_required = models.BooleanField(
+        default=True,
+    )
+
+    is_active = models.BooleanField(
+        default=True,
+    )
+
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    updated_at = models.DateTimeField(
+        auto_now=True,
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "code"],
+                name="unique_document_requirement_code_per_org",
+            )
+        ]
+        ordering = ["name"]
+
+    def __str__(self):
+        return (
+            f"{self.organization.code} - "
+            f"{self.code} - "
+            f"{self.name}"
         )
