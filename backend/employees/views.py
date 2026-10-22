@@ -6,11 +6,12 @@ from .models import (
     EmployeeDocument,
     OnboardingCorrectionRequest,
     OnboardingCorrectionItem,
+    EmployeeOnboardingDetails,
 )
 
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from accounts.models import DocumentRequirement
+from accounts.models import DocumentRequirement, UserProfile
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.generics import GenericAPIView
 
@@ -54,6 +55,7 @@ from .services import (
     can_approve_employee_onboarding,
     can_manage_onboarding_corrections,
     verify_employee_document,
+    can_verify_employee_document,
 )
 
 from rest_framework.parsers import (
@@ -77,25 +79,83 @@ def mask_email(email):
 
 class EmployeeOnboardingDocumentsAPIView(GenericAPIView):
     permission_classes = [IsAuthenticated]
-    parser_classes = [
-        MultiPartParser,
-        FormParser,
-    ]
+    parser_classes = [MultiPartParser, FormParser]
     serializer_class = EmployeeDocumentUploadSerializer
 
     def get(self, request):
+        is_hr_lookup = False
+
         try:
             employee = request.user.employee_record
         except Employee.DoesNotExist:
-            return Response(
-                {
-                    "error": (
-                        "The authenticated user is not linked "
-                        "to an employee record."
-                    ),
-                },
-                status=status.HTTP_403_FORBIDDEN,
+            employee = None
+
+        if employee is None:
+            try:
+                profile = request.user.worksphere_profile
+            except UserProfile.DoesNotExist:
+                return Response(
+                    {
+                        "error": (
+                            "The authenticated user is not linked "
+                            "to an employee record or HR profile."
+                        )
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            if profile.role != UserProfile.Role.HR:
+                return Response(
+                    {
+                        "error": (
+                            "Only the assigned HR user may look up "
+                            "employee onboarding documents."
+                        )
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            onboarding_reference = (
+                request.query_params.get("onboarding_reference")
             )
+
+            if not onboarding_reference:
+                return Response(
+                    {
+                        "error": (
+                            "Provide the onboarding_reference "
+                            "query parameter."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            employee = Employee.objects.filter(
+                onboarding_reference=onboarding_reference,
+                organization_id=profile.organization_id,
+            ).first()
+
+            if employee is None:
+                return Response(
+                    {"error": "Employee onboarding record not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            if not can_verify_employee_document(
+                employee,
+                request.user,
+            ):
+                return Response(
+                    {
+                        "error": (
+                            "You are not authorized to view "
+                            "these employee documents."
+                        )
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+            is_hr_lookup = True
 
         requirements = (
             DocumentRequirement.objects
@@ -115,7 +175,6 @@ class EmployeeOnboardingDocumentsAPIView(GenericAPIView):
 
         for requirement in requirements:
             document = documents.get(requirement.id)
-
             file_url = None
 
             if document is not None and document.file:
@@ -125,6 +184,9 @@ class EmployeeOnboardingDocumentsAPIView(GenericAPIView):
 
             response_data.append(
                 {
+                    "document_id": (
+                        document.id if document is not None else None
+                    ),
                     "document_requirement_id": requirement.id,
                     "code": requirement.code,
                     "name": requirement.name,
@@ -144,10 +206,19 @@ class EmployeeOnboardingDocumentsAPIView(GenericAPIView):
                 }
             )
 
+        response_payload = {"documents": response_data}
+
+        if is_hr_lookup:
+            response_payload["onboarding_reference"] = (
+                employee.onboarding_reference
+            )
+            response_payload["employee_name"] = (
+                f"{employee.first_name} {employee.last_name}"
+            )
+            response_payload["employee_status"] = employee.status
+
         return Response(
-            {
-                "documents": response_data,
-            },
+            response_payload,
             status=status.HTTP_200_OK,
         )
 
@@ -160,7 +231,7 @@ class EmployeeOnboardingDocumentsAPIView(GenericAPIView):
                     "error": (
                         "The authenticated user is not linked "
                         "to an employee record."
-                    ),
+                    )
                 },
                 status=status.HTTP_403_FORBIDDEN,
             )
@@ -168,10 +239,7 @@ class EmployeeOnboardingDocumentsAPIView(GenericAPIView):
         serializer = EmployeeDocumentUploadSerializer(
             data=request.data,
         )
-
-        serializer.is_valid(
-            raise_exception=True
-        )
+        serializer.is_valid(raise_exception=True)
 
         try:
             document = save_employee_document(
@@ -181,30 +249,23 @@ class EmployeeOnboardingDocumentsAPIView(GenericAPIView):
                         "document_requirement_id"
                     ]
                 ),
-                uploaded_file=serializer.validated_data[
-                    "file"
-                ],
+                uploaded_file=serializer.validated_data["file"],
                 uploaded_by=request.user,
             )
         except ValueError as exc:
             return Response(
-                {
-                    "error": str(exc),
-                },
+                {"error": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         return Response(
             {
-                "message": (
-                    "Employee document uploaded successfully."
-                ),
+                "message": "Employee document uploaded successfully.",
+                "document_id": document.id,
                 "document_requirement_id": (
                     document.document_requirement_id
                 ),
-                "document_name": (
-                    document.document_requirement.name
-                ),
+                "document_name": document.document_requirement.name,
                 "status": document.status,
             },
             status=status.HTTP_200_OK,
@@ -298,6 +359,33 @@ class EmployeeCreateAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        try:
+            user_profile = request.user.worksphere_profile
+        except UserProfile.DoesNotExist:
+            return Response(
+                {
+                    "error": (
+                        "The authenticated user is not configured "
+                        "as a WorkSphere user."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if user_profile.role not in (
+            UserProfile.Role.HR,
+            UserProfile.Role.ADMIN,
+        ):
+            return Response(
+                {
+                    "error": (
+                        "Only HR or Admin users can create "
+                        "employee onboarding records."
+                    )
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         serializer = EmployeeCreateSerializer(
             data=request.data,
             context={"request": request},
@@ -306,17 +394,22 @@ class EmployeeCreateAPIView(APIView):
 
         try:
             employee = serializer.save()
+        except PermissionError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         except ValueError as exc:
             return Response(
-                {
-                    "error": str(exc),
-                },
+                {"error": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
         return Response(
             {
-                "message": "Employee onboarding record created successfully.",
+                "message": (
+                    "Employee onboarding record created successfully."
+                ),
                 "onboarding_reference": employee.onboarding_reference,
                 "status": employee.status,
                 "account_status": "PENDING_ACTIVATION",
@@ -688,7 +781,13 @@ class ResendEmployeeActivationAPIView(APIView):
 
         try:
             resend_employee_activation_notification(
-                employee
+                employee,
+                requested_by=request.user,
+            )
+        except PermissionError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
             )
         except ValueError as exc:
             return Response(
@@ -801,21 +900,42 @@ class VerifyEmployeeActivationTokenAPIView(APIView):
     authentication_classes = []
     permission_classes = []
 
+    def get(self, request):
+        # This is the link opened from the activation email.
+        raw_token = request.query_params.get("token")
+
+        if not raw_token:
+            return Response(
+                {
+                    "error": (
+                        "The activation token is missing "
+                        "from the URL."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return self.verify_token(raw_token)
+
     def post(self, request):
+        # Preserve the existing POST API behaviour.
         serializer = VerifyEmployeeActivationTokenSerializer(
             data=request.data
         )
         serializer.is_valid(raise_exception=True)
 
+        return self.verify_token(
+            serializer.validated_data["activation_token"]
+        )
+
+    def verify_token(self, raw_token):
         try:
-            activation_token = get_valid_employee_activation_token(
-                serializer.validated_data["activation_token"]
+            activation_token = (
+                get_valid_employee_activation_token(raw_token)
             )
         except ValueError as exc:
             return Response(
-                {
-                    "error": str(exc),
-                },
+                {"error": str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 

@@ -48,7 +48,121 @@ from accounts.models import (
 from notifications.services import (
     send_employee_activation_notification,
     send_employee_activation_otp_notification,
+    schedule_notification,
 )
+
+
+def _employee_notification_label(employee):
+    full_name = " ".join(
+        part
+        for part in (
+            getattr(employee, "first_name", ""),
+            getattr(employee, "last_name", ""),
+        )
+        if part
+    ).strip()
+
+    reference = getattr(
+        employee,
+        "onboarding_reference",
+        None,
+    )
+
+    if full_name and reference:
+        return f"{full_name} ({reference})"
+
+    return (
+        reference
+        or full_name
+        or f"Employee record #{employee.pk}"
+    )
+
+
+def _schedule_onboarding_notification(
+    *,
+    employee,
+    user,
+    title,
+    message,
+    metadata=None,
+):
+    if user is None:
+        return
+
+    notification_metadata = {
+        "onboarding_reference": getattr(
+            employee,
+            "onboarding_reference",
+            None,
+        ),
+        "employee_status": getattr(
+            employee,
+            "status",
+            None,
+        ),
+    }
+
+    notification_metadata.update(metadata or {})
+
+    schedule_notification(
+        user=user,
+        organization_id=employee.organization_id,
+        title=title,
+        message=message,
+        category="ONBOARDING",
+        metadata=notification_metadata,
+    )
+
+
+def _notify_onboarding_employee(
+    employee,
+    *,
+    title,
+    message,
+    metadata=None,
+):
+    if not getattr(employee, "user_id", None):
+        return
+
+    _schedule_onboarding_notification(
+        employee=employee,
+        user=employee.user,
+        title=title,
+        message=message,
+        metadata=metadata,
+    )
+
+
+def _notify_assigned_onboarding_hr(
+    employee,
+    *,
+    title,
+    message,
+    metadata=None,
+):
+    assignment = (
+        DepartmentApprover.objects
+        .filter(
+            organization_id=employee.organization_id,
+            department_id=employee.department_id,
+            is_active=True,
+        )
+        .select_related("hr_user")
+        .first()
+    )
+
+    if assignment is None:
+        return
+
+    _schedule_onboarding_notification(
+        employee=employee,
+        user=assignment.hr_user,
+        title=title,
+        message=message,
+        metadata=metadata,
+    )
+
+
 
 @transaction.atomic
 def get_next_employee_id_sequence():
@@ -197,6 +311,15 @@ def create_employee(
             "The user is not configured as a WorkSphere user."
         )
 
+    if user_profile.role not in (
+        UserProfile.Role.HR,
+        UserProfile.Role.ADMIN,
+    ):
+        raise PermissionError(
+            "Only HR or Admin users can create "
+            "employee onboarding records."
+        )
+
     if not user_profile.organization.is_active:
         raise ValueError(
             "The user's organization is not active."
@@ -260,6 +383,38 @@ def start_employee_onboarding(employee):
     return employee
 
 
+def are_required_employee_documents_verified(employee):
+    required_requirements = list(
+        DocumentRequirement.objects.filter(
+            organization_id=employee.organization_id,
+            is_active=True,
+            is_required=True,
+        ).order_by("id")
+    )
+
+    # Fail closed if required-document configuration is missing.
+    if not required_requirements:
+        return False
+
+    for requirement in required_requirements:
+        document = (
+            EmployeeDocument.objects.filter(
+                employee=employee,
+                document_requirement=requirement,
+            ).first()
+        )
+
+        if (
+            document is None
+            or not document.file
+            or document.status
+            != EmployeeDocument.Status.VERIFIED
+        ):
+            return False
+
+    return True
+
+
 
 @transaction.atomic
 def submit_employee_onboarding(employee):
@@ -277,7 +432,10 @@ def submit_employee_onboarding(employee):
         employee
     )
 
-    employee.status = Employee.Status.ONBOARDING_SUBMITTED
+    if are_required_employee_documents_verified(employee):
+        employee.status = Employee.Status.PENDING_APPROVAL
+    else:
+        employee.status = Employee.Status.ONBOARDING_SUBMITTED
 
     employee.save(
         update_fields=[
@@ -286,7 +444,23 @@ def submit_employee_onboarding(employee):
         ]
     )
 
+    _notify_assigned_onboarding_hr(
+        employee,
+        title="Employee onboarding submitted",
+        message=(
+            f"{_employee_notification_label(employee)} "
+            f"submitted onboarding. Current status: "
+            f"{employee.status}. Please review the submitted "
+            "details and required documents."
+        ),
+        metadata={
+            "event": "onboarding_submitted",
+            "employee_status": employee.status,
+        },
+    )
+
     return employee
+
 
 
 def can_approve_employee_onboarding(employee, user):
@@ -391,6 +565,32 @@ def can_verify_employee_document(employee, user):
     return assignment is not None
 
 
+def can_manage_employee_activation(employee, user):
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+
+    try:
+        user_profile = user.worksphere_profile
+    except (UserProfile.DoesNotExist, AttributeError):
+        return False
+
+    if employee.organization_id != user_profile.organization_id:
+        return False
+
+    if user_profile.role == UserProfile.Role.ADMIN:
+        return True
+
+    if user_profile.role != UserProfile.Role.HR:
+        return False
+
+    return DepartmentApprover.objects.filter(
+        organization_id=employee.organization_id,
+        department_id=employee.department_id,
+        hr_user=user,
+        is_active=True,
+    ).exists()
+
+
 @transaction.atomic
 def verify_employee_document(
     document_id,
@@ -439,6 +639,23 @@ def verify_employee_document(
             "updated_at",
         ]
     )
+
+    # After HR verifies the final required document, move a submitted
+    # onboarding record to the final-approval stage.
+    if (
+        employee.status == Employee.Status.ONBOARDING_SUBMITTED
+        and are_required_employee_documents_verified(employee)
+    ):
+        employee.status = Employee.Status.PENDING_APPROVAL
+        employee.updated_by = verified_by
+
+        employee.save(
+            update_fields=[
+                "status",
+                "updated_by",
+                "updated_at",
+            ]
+        )
 
     return document
 
@@ -546,7 +763,19 @@ def create_employee_activation_token(employee):
 
 
 @transaction.atomic
-def resend_employee_activation_notification(employee):
+def resend_employee_activation_notification(
+    employee,
+    requested_by,
+):
+    if not can_manage_employee_activation(
+        employee,
+        requested_by,
+    ):
+        raise PermissionError(
+            "Only the assigned HR user or an Admin in the same "
+            "organization may resend an employee activation link."
+        )
+
     if employee.status != Employee.Status.PENDING_ONBOARDING:
         raise ValueError(
             "Activation link can only be resent before onboarding activation."
@@ -1117,15 +1346,40 @@ def approve_employee_onboarding(
             "You are not authorized to approve this employee onboarding."
         )
 
-    required_requirements = (
-        DocumentRequirement.objects
-        .filter(
+    # A permanent Employee ID must not already exist before final approval.
+    # Existing inconsistent records require separate investigation.
+    if employee.employee_id:
+        raise ValueError(
+            "This employee already has a permanent Employee ID. "
+            "Investigate the existing record before final approval."
+        )
+
+    # The employee must already have activated their own account before
+    # completing onboarding and requesting final HR approval.
+    if (
+        employee.user_id is None
+        or not employee.user.is_active
+    ):
+        raise ValueError(
+            "The employee account must be activated before "
+            "final onboarding approval."
+        )
+
+    # Load all active, required document requirements for this organization.
+    required_requirements = list(
+        DocumentRequirement.objects.filter(
             organization_id=employee.organization_id,
             is_required=True,
             is_active=True,
-        )
-        .order_by("id")
+        ).order_by("id")
     )
+
+    # Fail closed: an empty configuration must never bypass verification.
+    if not required_requirements:
+        raise ValueError(
+            "Final approval is blocked because this organization "
+            "has no active required document requirements configured."
+        )
 
     documents = {
         document.document_requirement_id: document
@@ -1144,9 +1398,7 @@ def approve_employee_onboarding(
             document is None
             or document.status != EmployeeDocument.Status.VERIFIED
         ):
-            unverified_documents.append(
-                requirement.code
-            )
+            unverified_documents.append(requirement.code)
 
     if unverified_documents:
         raise ValueError(
@@ -1162,6 +1414,7 @@ def approve_employee_onboarding(
             "No active Employee ID configuration has been configured."
         )
 
+    # Generate the permanent ID only after every approval check succeeds.
     employee.employee_id = generate_employee_id(employee)
     employee.employee_id_configuration = configuration
     employee.status = Employee.Status.ACTIVE
@@ -1177,7 +1430,20 @@ def approve_employee_onboarding(
         ]
     )
 
-    provision_employee_account(employee)
+    _notify_onboarding_employee(
+        employee,
+        title="Employee onboarding approved",
+        message=(
+            "Your WorkSphere onboarding has been approved. "
+            f"Your permanent Employee ID is {employee.employee_id}. "
+            "Your employee record is now active."
+        ),
+        metadata={
+            "event": "onboarding_approved",
+            "employee_id": employee.employee_id,
+            "employee_status": employee.status,
+        },
+    )
 
     return employee
 
@@ -1231,6 +1497,28 @@ def create_onboarding_correction_request(
             "updated_by",
             "updated_at",
         ]
+    )
+
+    correction_summary = "\n".join(
+        f"- {item['field_name']}: {item['instruction']}"
+        for item in correction_items
+    )
+
+    _notify_onboarding_employee(
+        employee,
+        title="Onboarding corrections required",
+        message=(
+            "HR has requested changes to your onboarding details "
+            "or documents:\n\n"
+            f"{correction_summary}\n\n"
+            "Please complete the requested corrections and resubmit "
+            "your onboarding."
+        ),
+        metadata={
+            "event": "onboarding_corrections_required",
+            "correction_request_id": correction_request.id,
+            "employee_status": employee.status,
+        },
     )
 
     return correction_request
@@ -1290,7 +1578,20 @@ def resubmit_onboarding_after_corrections(employee):
             "updated_at",
         ]
     )
-
+    _notify_assigned_onboarding_hr(
+        employee,
+        title="Onboarding corrections resubmitted",
+        message=(
+            f"{_employee_notification_label(employee)} "
+            "resubmitted onboarding corrections. Please review "
+            "the correction items."
+        ),
+        metadata={
+            "event": "onboarding_corrections_resubmitted",
+            "correction_request_id": correction_request.id,
+            "employee_status": employee.status,
+        },
+    )
     return correction_request
 
 

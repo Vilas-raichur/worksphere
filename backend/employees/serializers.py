@@ -278,6 +278,16 @@ class ApproveOnboardingSerializer(serializers.Serializer):
 class EmployeeOnboardingDetailsSerializer(
     serializers.ModelSerializer
 ):
+    emergency_contact_mobile = serializers.RegexField(
+        regex=r"^[6-9][0-9]{9}$",
+        error_messages={
+            "invalid": (
+                "Enter a valid 10-digit Indian mobile number "
+                "starting with 6, 7, 8, or 9."
+            ),
+        },
+    )
+
     class Meta:
         model = EmployeeOnboardingDetails
         fields = (
@@ -326,8 +336,14 @@ class EmployeeOnboardingDetailsSubmissionSerializer(
         max_length=150,
     )
 
-    emergency_contact_mobile = serializers.CharField(
-        max_length=15,
+    emergency_contact_mobile = serializers.RegexField(
+        regex=r"^[6-9][0-9]{9}$",
+        error_messages={
+            "invalid": (
+                "Enter a valid 10-digit Indian mobile number "
+                "starting with 6, 7, 8, or 9."
+            ),
+        },
     )
 
     emergency_contact_relationship = serializers.CharField(
