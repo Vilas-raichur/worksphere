@@ -22,6 +22,15 @@ class Organization(models.Model):
         default=True
     )
 
+    # Leave type management permissions are configured by Super Admin.
+    # Both grants default to disabled.
+    allow_admin_manage_leave_types = models.BooleanField(
+        default=False
+    )
+    allow_hr_manage_leave_types = models.BooleanField(
+        default=False
+    )
+
     created_at = models.DateTimeField(
         auto_now_add=True
     )
