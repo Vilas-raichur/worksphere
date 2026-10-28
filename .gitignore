@@ -26,3 +26,9 @@ media/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local WorkSphere development maintenance script
+/backend/run_attendance_maintenance.bat
+
+# Local environment configuration templates
+.env.example

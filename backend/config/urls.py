@@ -6,8 +6,11 @@ from django.urls import include, path
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    path("api/employees/", include("employees.urls")),
     path("api-auth/", include("rest_framework.urls")),
+    path("api/employees/", include("employees.urls")),
+    path("api/attendance/", include("attendance.urls")),
+    path("api/notifications/", include("notifications.urls")),
+    path("api/leaves/", include("leave_management.urls")),
 ]
 
 
@@ -16,4 +19,3 @@ if settings.DEBUG:
         settings.MEDIA_URL,
         document_root=settings.MEDIA_ROOT,
     )
-

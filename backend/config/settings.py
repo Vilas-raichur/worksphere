@@ -22,7 +22,12 @@ load_dotenv(BASE_DIR.parent / ".env")
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-lsy16$4!_$0d8*6@=fv-9c#nst*gwp!k7u6^l+yics5j5psf7k'
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
+
+if not SECRET_KEY:
+    raise RuntimeError(
+        "DJANGO_SECRET_KEY must be configured in the project .env file."
+    )
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -44,6 +49,8 @@ INSTALLED_APPS = [
     'accounts',
     'employees',
     'notifications',
+    'attendance',
+    "leave_management",
 ]
 
 MIDDLEWARE = [
@@ -130,13 +137,26 @@ STATIC_URL = 'static/'
 
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND",
-    "django.core.mail.backends.console.EmailBackend",
+    "django.core.mail.backends.smtp.EmailBackend",
 )
+
+EMAIL_HOST = os.getenv("EMAIL_HOST", "smtp.gmail.com")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+
+EMAIL_USE_TLS = os.getenv(
+    "EMAIL_USE_TLS",
+    "True",
+).strip().lower() in ("true", "1", "yes", "on")
+
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 
 DEFAULT_FROM_EMAIL = os.getenv(
     "DEFAULT_FROM_EMAIL",
-    "notifications@worksphere.local",
+    EMAIL_HOST_USER,
 )
+
+EMAIL_TIMEOUT = int(os.getenv("EMAIL_TIMEOUT", "20"))
 
 WORKSPHERE_ACTIVATION_URL = os.getenv(
     "WORKSPHERE_ACTIVATION_URL",
