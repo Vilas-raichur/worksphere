@@ -63,6 +63,7 @@ class LeaveWorkflowNotificationTests(TestCase):
             employee_id=12,
             organization_id=1,
             leave_type=self.leave_type,
+            leave_type_id=self.leave_type.pk,
             manager_at_request=self.manager,
             manager_at_request_id=self.manager.pk,
             status=LeaveRequest.Status.PENDING,
@@ -152,12 +153,15 @@ class LeaveWorkflowNotificationTests(TestCase):
                 self.leave_request
             )
 
-            result = decide_leave_request(
-                leave_request_id=self.leave_request.pk,
-                reviewer=self.manager,
-                decision=decision,
-                remarks="Recorded for testing.",
-            )
+            with patch(
+                "leave_management.services.reconcile_carry_forward_consumption"
+            ):
+                result = decide_leave_request(
+                    leave_request_id=self.leave_request.pk,
+                    reviewer=self.manager,
+                    decision=decision,
+                    remarks="Recorded for testing.",
+                )
 
         self.assertIs(result, self.leave_request)
         notify.assert_called_once()

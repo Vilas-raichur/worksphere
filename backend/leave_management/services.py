@@ -11,6 +11,10 @@ from attendance.services import (
     local_today,
 )
 
+from leave_management.carry_forward_services import (
+    reconcile_carry_forward_consumption,
+)
+
 from leave_management.models import LeaveBalance, LeaveRequest
 
 @transaction.atomic
@@ -190,6 +194,12 @@ def decide_leave_request(
             "updated_at",
         ]
     )
+
+    if decision == LeaveRequest.Status.APPROVED:
+        reconcile_carry_forward_consumption(
+            employee=leave_request.employee,
+            leave_type_id=leave_request.leave_type_id,
+        )
     decision_word = (
         "approved"
         if decision == LeaveRequest.Status.APPROVED

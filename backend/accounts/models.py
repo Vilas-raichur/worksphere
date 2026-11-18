@@ -2,6 +2,11 @@ from django.db import models
 from django.conf import settings
 from django.db.models import Q
 
+import calendar
+
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
+
 
 class Organization(models.Model):
     name = models.CharField(
@@ -30,7 +35,22 @@ class Organization(models.Model):
     allow_hr_manage_leave_types = models.BooleanField(
         default=False
     )
-
+    # The organization's leave year starts on this month and day.
+    # Examples: 1 January (calendar year), 1 April (financial year).
+    leave_year_start_month = models.PositiveSmallIntegerField(
+        default=1,
+        validators=[
+            MinValueValidator(1),
+            MaxValueValidator(12),
+        ],
+    )
+    leave_year_start_day = models.PositiveSmallIntegerField(
+        default=1,
+        validators=[
+            MinValueValidator(1),
+            MaxValueValidator(31),
+        ],
+    )
     created_at = models.DateTimeField(
         auto_now_add=True
     )
@@ -39,6 +59,30 @@ class Organization(models.Model):
         auto_now=True
     )
 
+    def clean(self):
+        super().clean()
+
+        month = self.leave_year_start_month
+        day = self.leave_year_start_day
+
+        if not 1 <= month <= 12:
+            raise ValidationError({
+                "leave_year_start_month": "Month must be between 1 and 12."
+            })
+
+        if not 1 <= day <= 31:
+            raise ValidationError({
+                "leave_year_start_day": "Day must be between 1 and 31."
+            })
+
+        maximum_day = calendar.monthrange(2000, month)[1]
+
+        if day > maximum_day:
+            raise ValidationError({
+                "leave_year_start_day": (
+                    f"Day {day} is not valid for month {month}."
+                )
+            })
     def __str__(self):
         return f"{self.name} ({self.code})"
 

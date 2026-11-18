@@ -226,6 +226,7 @@ class LeaveDecisionServiceTests(TestCase):
             organization_id=1,
             employee=self.employee,
             leave_type=SimpleNamespace(name="Annual Leave"),
+            leave_type_id=1,
             manager_at_request_id=99,
             start_date=date(2026, 10, 20),
             end_date=date(2026, 10, 21),
@@ -291,12 +292,15 @@ class LeaveDecisionServiceTests(TestCase):
         with patch(
             "leave_management.services._validate_manager_eligibility"
         ):
-            result = decide_leave_request(
-                50,
-                self.manager,
-                LeaveRequest.Status.APPROVED,
-                "Approved for testing.",
-            )
+            with patch(
+                "leave_management.services.reconcile_carry_forward_consumption"
+            ):
+                result = decide_leave_request(
+                    leave_request_id=self.leave_request.pk,
+                    reviewer=self.manager,
+                    decision=LeaveRequest.Status.APPROVED,
+                    remarks="Approved for testing.",
+                )
 
         self.assertIs(result, self.leave_request)
         self.assertEqual(

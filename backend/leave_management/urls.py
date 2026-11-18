@@ -9,6 +9,12 @@ from leave_management.views import (
     LeaveTypeManagementPolicyAPIView,
     LeaveRequestCancelAPIView,
     LeaveBalanceSummaryAPIView,
+    LeavePolicyPermissionListCreateAPIView,
+    LeavePolicyPermissionRevokeAPIView,
+    LeavePolicyListCreateAPIView,
+    LeavePolicyVersionCreateAPIView,
+    LeavePolicyRuleCreateAPIView,
+    LeavePolicyPublishAPIView,
 )
 
 urlpatterns = [
@@ -47,5 +53,35 @@ urlpatterns = [
     "balance/",
     LeaveBalanceSummaryAPIView.as_view(),
     name="leave-balance-summary",
+    ),
+    path(
+        "policy-permissions/",
+        LeavePolicyPermissionListCreateAPIView.as_view(),
+        name="leave-policy-permissions",
+    ),
+    path(
+        "policy-permissions/<int:permission_id>/",
+        LeavePolicyPermissionRevokeAPIView.as_view(),
+        name="leave-policy-permission-revoke",
+    ),
+    path(
+        "policies/",
+        LeavePolicyListCreateAPIView.as_view(),
+        name="leave-policies",
+    ),
+    path(
+        "policies/<int:policy_id>/versions/",
+        LeavePolicyVersionCreateAPIView.as_view(),
+        name="leave-policy-version-create",
+    ),
+    path(
+        "policies/versions/<int:version_id>/rules/",
+        LeavePolicyRuleCreateAPIView.as_view(),
+        name="leave-policy-rule-create",
+    ),
+    path(
+        "policies/versions/<int:version_id>/publish/",
+        LeavePolicyPublishAPIView.as_view(),
+        name="leave-policy-publish",
     ),
 ]

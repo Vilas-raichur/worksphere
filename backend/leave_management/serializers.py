@@ -1,6 +1,13 @@
 from rest_framework import serializers
 
-from leave_management.models import LeaveRequest, LeaveType
+from leave_management.models import (
+    LeavePolicy,
+    LeavePolicyManagementPermission,
+    LeavePolicyRule,
+    LeavePolicyVersion,
+    LeaveRequest,
+    LeaveType,
+)
 
 
 class LeaveTypeReadSerializer(serializers.ModelSerializer):
@@ -156,3 +163,179 @@ class LeaveTypeManagementPolicySerializer(serializers.Serializer):
             )
 
         return attrs
+
+
+
+class LeavePolicyPermissionGrantSerializer(serializers.Serializer):
+    admin_profile_id = serializers.IntegerField(min_value=1)
+
+
+class LeavePolicyPermissionReadSerializer(serializers.ModelSerializer):
+    admin_username = serializers.CharField(
+        source="admin_user.user.username",
+        read_only=True,
+    )
+    granted_by_username = serializers.CharField(
+        source="granted_by.user.username",
+        read_only=True,
+    )
+
+    class Meta:
+        model = LeavePolicyManagementPermission
+        fields = [
+            "id",
+            "admin_user",
+            "admin_username",
+            "granted_by",
+            "granted_by_username",
+            "is_active",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+
+class LeavePolicyCreateSerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=30)
+    name = serializers.CharField(max_length=150)
+    description = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+    )
+
+
+class LeavePolicyReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LeavePolicy
+        fields = [
+            "id",
+            "code",
+            "name",
+            "description",
+            "is_active",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+
+class LeavePolicyVersionCreateSerializer(serializers.Serializer):
+    version_number = serializers.IntegerField(min_value=1)
+    effective_from = serializers.DateField()
+    effective_until = serializers.DateField(
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+
+    def validate(self, attrs):
+        end = attrs["effective_until"]
+        if end is not None and end < attrs["effective_from"]:
+            raise serializers.ValidationError(
+                {"effective_until": "Invalid effective date range."}
+            )
+        return attrs
+
+
+class LeavePolicyVersionReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LeavePolicyVersion
+        fields = [
+            "id",
+            "policy",
+            "version_number",
+            "status",
+            "effective_from",
+            "effective_until",
+            "published_by",
+            "published_at",
+        ]
+        read_only_fields = fields
+
+
+class LeavePolicyRuleCreateSerializer(serializers.Serializer):
+    leave_type_id = serializers.IntegerField(min_value=1)
+    monthly_accrual_days = serializers.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        min_value=0,
+    )
+    accrual_timing = serializers.ChoiceField(
+        choices=LeavePolicyRule.AccrualTiming.choices,
+    )
+    department_id = serializers.IntegerField(
+        min_value=1,
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    designation_id = serializers.IntegerField(
+        min_value=1,
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    employee_type = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=50,
+        default="",
+    )
+    probation_condition = serializers.ChoiceField(
+        choices=LeavePolicyRule.ProbationCondition.choices,
+        required=False,
+        default=LeavePolicyRule.ProbationCondition.ANY,
+    )
+    priority = serializers.IntegerField(
+        min_value=0,
+        required=False,
+        default=100,
+    )
+    allow_carry_forward = serializers.BooleanField(
+        required=False,
+        default=False,
+    )
+    carry_forward_limit_days = serializers.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        min_value=0,
+        required=False,
+        default=0,
+    )
+    carry_forward_interval_months = serializers.ChoiceField(
+        choices=(1, 2, 3, 4, 6, 12),
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+    carry_forward_expiry_months = serializers.IntegerField(
+        min_value=0,
+        max_value=32767,
+        required=False,
+        allow_null=True,
+        default=None,
+    )
+
+
+class LeavePolicyRuleReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LeavePolicyRule
+        fields = [
+            "id",
+            "version",
+            "leave_type",
+            "department",
+            "designation",
+            "employee_type",
+            "probation_condition",
+            "priority",
+            "monthly_accrual_days",
+            "accrual_timing",
+            "allow_carry_forward",
+            "carry_forward_limit_days",
+            "carry_forward_interval_months",
+            "carry_forward_expiry_months",
+            "is_active",
+        ]
+        read_only_fields = fields

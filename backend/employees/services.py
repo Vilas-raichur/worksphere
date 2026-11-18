@@ -45,6 +45,10 @@ from accounts.models import (
     UserProfile,
 )
 
+from employees.eligibility_services import (
+    create_initial_employee_eligibility,
+)
+
 from notifications.services import (
     send_employee_activation_notification,
     send_employee_activation_otp_notification,
@@ -347,6 +351,12 @@ def create_employee(
     )
 
     employee.save()
+
+    create_initial_employee_eligibility(
+        employee=employee,
+        effective_from=employee.joining_date,
+        changed_by=created_by,
+    )
 
     provision_employee_account(employee)
 

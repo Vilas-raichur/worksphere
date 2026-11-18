@@ -14,6 +14,8 @@ class OrganizationAdmin(admin.ModelAdmin):
         "name",
         "code",
         "is_active",
+        "leave_year_start_month",
+        "leave_year_start_day",
     )
 
 

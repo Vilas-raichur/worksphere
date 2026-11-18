@@ -11,7 +11,15 @@ from attendance.services import (
 )
 from employees.models import Employee
 
-from leave_management.models import LeaveRequest, LeaveType
+from leave_management.models import (
+    LeavePolicy,
+    LeavePolicyManagementPermission,
+    LeavePolicyRule,
+    LeavePolicyVersion,
+    LeaveRequest,
+    LeaveType,
+)
+
 from leave_management.serializers import (
     LeaveDecisionSerializer,
     LeaveRequestCreateSerializer,
@@ -19,6 +27,14 @@ from leave_management.serializers import (
     LeaveTypeManagementPolicySerializer,
     LeaveTypeReadSerializer,
     LeaveTypeWriteSerializer,
+    LeavePolicyPermissionGrantSerializer,
+    LeavePolicyPermissionReadSerializer,
+    LeavePolicyCreateSerializer,
+    LeavePolicyReadSerializer,
+    LeavePolicyVersionCreateSerializer,
+    LeavePolicyVersionReadSerializer,
+    LeavePolicyRuleCreateSerializer,
+    LeavePolicyRuleReadSerializer,
 )
 
 from leave_management.services import (
@@ -26,6 +42,22 @@ from leave_management.services import (
     decide_leave_request,
     cancel_leave_request,
     get_employee_leave_balance_summary,
+)
+
+from django.core.exceptions import ValidationError
+
+from leave_management.policy_permissions import (
+    grant_leave_policy_permission,
+    require_policy_super_admin,
+    revoke_leave_policy_permission,
+)
+
+from leave_management.policy_configuration import (
+    create_leave_policy,
+    create_policy_version,
+    create_policy_rule,
+    publish_policy_version,
+    require_policy_manager,
 )
 
 
@@ -555,5 +587,225 @@ class LeaveBalanceSummaryAPIView(APIView):
 
         return Response(
             summary,
+            status=status.HTTP_200_OK,
+        )
+
+
+
+class LeavePolicyPermissionListCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            super_admin = require_policy_super_admin(request.user)
+        except PermissionError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        permissions = (
+            LeavePolicyManagementPermission.objects.filter(
+                organization_id=super_admin.organization_id,
+            )
+            .select_related("admin_user__user", "granted_by__user")
+            .order_by("id")
+        )
+
+        serializer = LeavePolicyPermissionReadSerializer(
+            permissions,
+            many=True,
+        )
+        return Response(serializer.data)
+
+    def post(self, request):
+        serializer = LeavePolicyPermissionGrantSerializer(
+            data=request.data
+        )
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            permission = grant_leave_policy_permission(
+                granted_by=request.user,
+                admin_profile_id=(
+                    serializer.validated_data["admin_profile_id"]
+                ),
+            )
+        except PermissionError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except ValidationError as exc:
+            return Response(
+                {"error": exc.message_dict},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            LeavePolicyPermissionReadSerializer(permission).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+class LeavePolicyPermissionRevokeAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, permission_id):
+        try:
+            permission = revoke_leave_policy_permission(
+                revoked_by=request.user,
+                permission_id=permission_id,
+            )
+        except PermissionError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except ValidationError as exc:
+            return Response(
+                {"error": exc.message_dict},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response(
+            LeavePolicyPermissionReadSerializer(permission).data,
+            status=status.HTTP_200_OK,
+        )
+
+
+
+def _policy_error_response(exc):
+    if hasattr(exc, "message_dict"):
+        detail = exc.message_dict
+    else:
+        detail = exc.messages
+
+    return Response(
+        {"error": detail},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+class LeavePolicyListCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            profile = require_policy_manager(request.user)
+        except PermissionError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        policies = LeavePolicy.objects.filter(
+            organization_id=profile.organization_id,
+        ).order_by("name")
+
+        return Response(
+            LeavePolicyReadSerializer(policies, many=True).data
+        )
+
+    def post(self, request):
+        serializer = LeavePolicyCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            policy = create_leave_policy(
+                user=request.user,
+                **serializer.validated_data,
+            )
+        except PermissionError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except ValidationError as exc:
+            return _policy_error_response(exc)
+
+        return Response(
+            LeavePolicyReadSerializer(policy).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class LeavePolicyVersionCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, policy_id):
+        serializer = LeavePolicyVersionCreateSerializer(
+            data=request.data
+        )
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            version = create_policy_version(
+                user=request.user,
+                policy_id=policy_id,
+                **serializer.validated_data,
+            )
+        except PermissionError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except ValidationError as exc:
+            return _policy_error_response(exc)
+
+        return Response(
+            LeavePolicyVersionReadSerializer(version).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class LeavePolicyRuleCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, version_id):
+        serializer = LeavePolicyRuleCreateSerializer(
+            data=request.data
+        )
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            rule = create_policy_rule(
+                user=request.user,
+                version_id=version_id,
+                **serializer.validated_data,
+            )
+        except PermissionError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except ValidationError as exc:
+            return _policy_error_response(exc)
+
+        return Response(
+            LeavePolicyRuleReadSerializer(rule).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class LeavePolicyPublishAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, version_id):
+        try:
+            version = publish_policy_version(
+                user=request.user,
+                version_id=version_id,
+            )
+        except PermissionError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except ValidationError as exc:
+            return _policy_error_response(exc)
+
+        return Response(
+            LeavePolicyVersionReadSerializer(version).data,
             status=status.HTTP_200_OK,
         )

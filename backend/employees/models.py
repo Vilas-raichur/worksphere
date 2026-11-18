@@ -1,6 +1,6 @@
 from django.db import models
 from django.conf import settings
-
+from django.core.exceptions import ValidationError
 
 class Department(models.Model):
     name = models.CharField(
@@ -425,6 +425,182 @@ class Employee(models.Model):
 
     def __str__(self):
         return f"{self.employee_id} - {self.first_name} {self.last_name}"
+
+
+class EmployeeEligibilityHistory(models.Model):
+
+    class Source(models.TextChoices):
+        MIGRATION_BASELINE = (
+            "MIGRATION_BASELINE",
+            "Migration Baseline",
+        )
+        EMPLOYEE_CREATION = (
+            "EMPLOYEE_CREATION",
+            "Employee Creation",
+        )
+        ADMIN_UPDATE = (
+            "ADMIN_UPDATE",
+            "Admin Update",
+        )
+
+    employee = models.ForeignKey(
+        Employee,
+        on_delete=models.PROTECT,
+        related_name="eligibility_history",
+    )
+
+    organization = models.ForeignKey(
+        "accounts.Organization",
+        on_delete=models.PROTECT,
+        related_name="employee_eligibility_history",
+        null=True,
+        blank=True,
+    )
+
+    joining_date = models.DateField()
+
+    probation_end_date = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    employee_type = models.CharField(
+        max_length=50,
+    )
+
+    department = models.ForeignKey(
+        Department,
+        on_delete=models.PROTECT,
+        related_name="employee_eligibility_history",
+    )
+
+    designation = models.ForeignKey(
+        Designation,
+        on_delete=models.PROTECT,
+        related_name="employee_eligibility_history",
+    )
+
+    effective_from = models.DateField()
+
+    effective_until = models.DateField(
+        null=True,
+        blank=True,
+    )
+
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="employee_eligibility_changes",
+    )
+
+    source = models.CharField(
+        max_length=30,
+        choices=Source.choices,
+    )
+
+    recorded_at = models.DateTimeField(
+        auto_now_add=True,
+    )
+
+    class Meta:
+        ordering = (
+            "employee_id",
+            "effective_from",
+            "id",
+        )
+
+        constraints = [
+            models.UniqueConstraint(
+                fields=["employee"],
+                condition=models.Q(effective_until__isnull=True),
+                name="uniq_employee_open_eligibility",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(effective_until__isnull=True)
+                    | models.Q(
+                        effective_until__gte=models.F("effective_from")
+                    )
+                ),
+                name="eligibility_end_gte_start",
+            ),
+        ]
+
+        indexes = [
+            models.Index(
+                fields=[
+                    "organization",
+                    "employee",
+                    "effective_from",
+                    "effective_until",
+                ],
+                name="emp_eligibility_lookup_idx",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            original = type(self).objects.get(pk=self.pk)
+
+            unchanged_fields = all(
+                getattr(original, field.attname)
+                == getattr(self, field.attname)
+                for field in self._meta.concrete_fields
+                if field.name not in ("id", "effective_until")
+            )
+
+            is_valid_closure = (
+                original.effective_until is None
+                and self.effective_until is not None
+                and unchanged_fields
+            )
+
+            if not is_valid_closure:
+                raise ValidationError(
+                    "Eligibility history is immutable. "
+                    "Only closing an open eligibility period is allowed."
+                )
+
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError(
+            "Eligibility history records cannot be deleted."
+        )
+
+    def clean(self):
+        super().clean()
+
+        if self.effective_until is not None:
+            if self.effective_until < self.effective_from:
+                raise ValidationError({
+                    "effective_until": (
+                        "The effective end date cannot be "
+                        "before the effective start date."
+                    )
+                })
+
+        if self.employee_id and self.organization_id:
+            if (
+                self.employee.organization_id
+                != self.organization_id
+            ):
+                raise ValidationError({
+                    "organization": (
+                        "The history organization must match "
+                        "the employee organization."
+                    )
+                })
+
+    def __str__(self):
+        return (
+            f"{self.employee_id} eligibility "
+            f"from {self.effective_from}"
+        )
+
 
 
 class EmployeeActivationToken(models.Model):
